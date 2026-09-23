@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, relative, resolve, sep } from "node:path";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import PDFDocument from "pdfkit";
 //#region server/db.mjs
 function postgresSql(sql) {
 	let n = 0;
@@ -4546,7 +4547,7 @@ function buildManagerRequestEmail({ request, candidates = [], appUrl }) {
 	if (request.status === "agreed") {
 		const title = "Клиент согласовал путешествие";
 		const intro = "Заявка передана на оформление. Проверьте актуальность согласованных условий и выполните бронирование. При изменении стоимости или состава услуг получите новое согласование клиента.";
-		const j = request.journey, q = currentQuote$1(request);
+		const j = request.journey, q = currentQuote$2(request);
 		const bookingFacts = [
 			["Согласованная поездка", defined(j?.title, "Маршрут отсутствует — откройте заявку для проверки")],
 			["Начало поездки", day(q?.travelDate || request.input?.date)],
@@ -4593,7 +4594,7 @@ function buildManagerRequestEmail({ request, candidates = [], appUrl }) {
 		text: `TIARE TRAVEL\n${title}\n\n${intro}\n\nВНУТРЕННЕЕ ПИСЬМО АГЕНТСТВУ. Демонстрационные суммы не подтверждают стоимость и наличие.\n\n${factsText(facts)}\n\n${items.length ? items.map((x) => x.text).join("\n\n") : noCandidates}\n\nОткрыть заявку (вход в сервис): ${url}`
 	};
 }
-function currentQuote$1(request) {
+function currentQuote$2(request) {
 	const q = request.quote, now = Date.now();
 	if (!["proposal", "agreed"].includes(request.status) || !q || !Number.isFinite(q.amount) || q.amount <= 0 || !safePublicUrl(q.source) || !dateOnlyValid(q.travelDate) || !instantValid(q.checkedAt) || !instantValid(q.validUntil) || Date.parse(q.checkedAt) > now || Date.parse(q.validUntil) <= now || Date.parse(q.validUntil) <= Date.parse(q.checkedAt) || raw(q.scope).length < 15 || raw(q.availability).length < 10 || raw(q.terms).length < 10) return null;
 	return q;
@@ -4628,7 +4629,7 @@ function buildClientProposalEmail({ request, appUrl }) {
 		"agreed"
 	].includes(request.status) || !request.journey || typeof request.journey !== "object") throw invalid("EMAIL_NOT_PUBLISHED", "Сначала опубликуйте одобренное предложение для клиента.");
 	const url = requestLink(appUrl, request.id, "requests");
-	const j = request.journey, q = currentQuote$1(request), parts = publishedJourneyParts(j), i = request.input ?? {};
+	const j = request.journey, q = currentQuote$2(request), parts = publishedJourneyParts(j), i = request.input ?? {};
 	const title = defined(j.title, "Ваше путешествие");
 	const intro = `${defined(request.customerName, "Здравствуйте")}, менеджер подготовил для вас предложение. ${request.status === "agreed" ? "Вы согласовали его; следующий шаг — оформление менеджером." : "Посмотрите маршрут и обсудите необходимые изменения с менеджером."}`;
 	const summary = [
@@ -5187,13 +5188,13 @@ function createOutbox(db, env, providers = {
 //#region server/workspace.mjs
 var json = (value) => JSON.stringify(value);
 var now = () => (/* @__PURE__ */ new Date()).toISOString();
-var fail = (status, message) => {
+var fail$1 = (status, message) => {
 	const error = new Error(message);
 	error.status = status;
 	throw error;
 };
-var uuid = stringType().uuid(), revision = numberType().int().nonnegative(), https = stringType().url().refine((s) => s.startsWith("https://") && !new URL(s).username && !new URL(s).password);
-var quoteSchema = objectType({
+var uuid$1 = stringType().uuid(), revision = numberType().int().nonnegative(), https = stringType().url().refine((s) => s.startsWith("https://") && !new URL(s).username && !new URL(s).password);
+var quoteSchema$1 = objectType({
 	amount: numberType().int().positive().max(1e8),
 	source: https,
 	travelDate: stringType(),
@@ -5207,7 +5208,7 @@ var managerNote = stringType().max(4e3).default("");
 var actionSchema = discriminatedUnionType("action", [
 	objectType({
 		action: literalType("create_request"),
-		id: uuid,
+		id: uuid$1,
 		input: inputSchema,
 		journeyId: stringType().nullable().optional(),
 		customerName: stringType().trim().min(2).max(150),
@@ -5217,32 +5218,39 @@ var actionSchema = discriminatedUnionType("action", [
 	}),
 	objectType({
 		action: literalType("regenerate_candidates"),
-		id: uuid,
+		id: uuid$1,
 		revision
 	}),
 	objectType({
 		action: literalType("save_candidate"),
-		id: uuid,
+		id: uuid$1,
 		revision,
-		candidateId: uuid,
+		candidateId: uuid$1,
 		journey: journeySchema
 	}),
 	objectType({
-		action: literalType("publish_candidate"),
-		id: uuid,
+		action: literalType("save_candidate_note"),
+		id: uuid$1,
 		revision,
-		candidateId: uuid,
+		candidateId: uuid$1,
+		reviewNote: stringType().max(4e3)
+	}),
+	objectType({
+		action: literalType("publish_candidate"),
+		id: uuid$1,
+		revision,
+		candidateId: uuid$1,
 		managerNote
 	}),
 	objectType({
 		action: literalType("save_internal_note"),
-		id: uuid,
+		id: uuid$1,
 		revision,
 		internalNote: stringType().max(8e3)
 	}),
 	objectType({
 		action: literalType("update_request"),
-		id: uuid,
+		id: uuid$1,
 		revision,
 		status: enumType([
 			"new",
@@ -5254,30 +5262,30 @@ var actionSchema = discriminatedUnionType("action", [
 		]),
 		journeyId: stringType().nullable().optional(),
 		managerNote,
-		quote: quoteSchema.nullable().optional()
+		quote: quoteSchema$1.nullable().optional()
 	}),
 	objectType({
 		action: literalType("select_request"),
-		id: uuid,
+		id: uuid$1,
 		revision
 	}),
 	objectType({
 		action: literalType("agree_request"),
-		id: uuid,
+		id: uuid$1,
 		revision
 	}),
 	objectType({
 		action: literalType("send_client_email"),
-		id: uuid,
+		id: uuid$1,
 		revision
 	}),
 	objectType({
 		action: literalType("retry_email"),
-		emailId: uuid
+		emailId: uuid$1
 	}),
 	objectType({
 		action: literalType("refresh_email"),
-		emailId: uuid
+		emailId: uuid$1
 	}),
 	objectType({
 		action: literalType("save_catalog"),
@@ -5331,44 +5339,44 @@ function makeCandidates(catalog, input) {
 	return chosen;
 }
 function validateJourney(j) {
-	if (j.minNights > j.maxNights || j.baseNights < j.minNights || j.baseNights > j.maxNights) fail(400, "Проверьте минимальную, базовую и максимальную продолжительность.");
-	if (j.priceKind === "estimate" && !/^https:\/\/\S+/.test(j.priceSource)) fail(400, "Для рабочего бюджетного ориентира нужна ссылка на источник.");
+	if (j.minNights > j.maxNights || j.baseNights < j.minNights || j.baseNights > j.maxNights) fail$1(400, "Проверьте минимальную, базовую и максимальную продолжительность.");
+	if (j.priceKind === "estimate" && !/^https:\/\/\S+/.test(j.priceSource)) fail$1(400, "Для рабочего бюджетного ориентира нужна ссылка на источник.");
 	return j;
 }
 function validateRequestDate(input) {
-	if (input.date && input.date < (/* @__PURE__ */ new Date()).toISOString().slice(0, 10)) fail(400, "Дата поездки уже прошла. Укажите новую дату.");
+	if (input.date && input.date < (/* @__PURE__ */ new Date()).toISOString().slice(0, 10)) fail$1(400, "Дата поездки уже прошла. Укажите новую дату.");
 }
 function validatePublished(request) {
-	if (!request.journey) fail(409, "Сначала выберите и одобрите вариант маршрута.");
+	if (!request.journey) fail$1(409, "Сначала выберите и одобрите вариант маршрута.");
 	const ranked = rankJourneys([{
 		...request.journey,
 		active: true
 	}], request.input)[0];
-	if (ranked.issues.length) fail(409, `Маршрут противоречит анкете: ${ranked.issues.join("; ")}. Измените вариант или оформите новую согласованную анкету.`);
-	if (ranked.review.length && request.managerNote.trim().length < 20) fail(400, "Опишите клиенту, как проверены индивидуальные условия и логистика маршрута.");
+	if (ranked.issues.length) fail$1(409, `Маршрут противоречит анкете: ${ranked.issues.join("; ")}. Измените вариант или оформите новую согласованную анкету.`);
+	if (ranked.review.length && request.managerNote.trim().length < 20) fail$1(400, "Опишите клиенту, как проверены индивидуальные условия и логистика маршрута.");
 	validateRequestDate(request.input);
 	return ranked;
 }
 function validateQuote(quote, request) {
-	const parsed = quoteSchema.safeParse(quote);
-	if (!parsed.success) fail(400, "Нужны полная стоимость, источник проверки, даты, наличие, состав услуг и условия оплаты и отмены.");
+	const parsed = quoteSchema$1.safeParse(quote);
+	if (!parsed.success) fail$1(400, "Нужны полная стоимость, источник проверки, даты, наличие, состав услуг и условия оплаты и отмены.");
 	const q = parsed.data;
-	if (q.amount > request.input.budget) fail(400, "Подтверждённая стоимость превышает бюджет клиента. Нужна новая согласованная анкета.");
-	if (!inputSchema.shape.date.safeParse(q.travelDate).success || !q.travelDate || q.travelDate < (/* @__PURE__ */ new Date()).toISOString().slice(0, 10)) fail(400, "Проверьте дату поездки.");
-	if (request.input.date && q.travelDate !== request.input.date) fail(400, "Дата предложения не совпадает с анкетой. Изменение дат оформляется новой согласованной заявкой.");
+	if (q.amount > request.input.budget) fail$1(400, "Подтверждённая стоимость превышает бюджет клиента. Нужна новая согласованная анкета.");
+	if (!inputSchema.shape.date.safeParse(q.travelDate).success || !q.travelDate || q.travelDate < (/* @__PURE__ */ new Date()).toISOString().slice(0, 10)) fail$1(400, "Проверьте дату поездки.");
+	if (request.input.date && q.travelDate !== request.input.date) fail$1(400, "Дата предложения не совпадает с анкетой. Изменение дат оформляется новой согласованной заявкой.");
 	const expiry = Date.parse(q.validUntil);
-	if (!Number.isFinite(expiry) || expiry <= Date.now()) fail(400, "Срок действия подтверждённой цены должен быть в будущем.");
-	if (expiry > Date.parse(q.travelDate + "T23:59:59.999Z")) fail(400, "Срок действия цены не может быть позже даты начала поездки.");
+	if (!Number.isFinite(expiry) || expiry <= Date.now()) fail$1(400, "Срок действия подтверждённой цены должен быть в будущем.");
+	if (expiry > Date.parse(q.travelDate + "T23:59:59.999Z")) fail$1(400, "Срок действия цены не может быть позже даты начала поездки.");
 	return {
 		...q,
 		validUntil: new Date(expiry).toISOString(),
 		checkedAt: now()
 	};
 }
-function currentQuote(request) {
-	if (!request.quote) fail(409, "Подтверждённое предложение ещё не готово.");
+function currentQuote$1(request) {
+	if (!request.quote) fail$1(409, "Подтверждённое предложение ещё не готово.");
 	const checked = Date.parse(request.quote.checkedAt);
-	if (!Number.isFinite(checked) || checked > Date.now() + 1e3) fail(409, "Данные проверки цены некорректны.");
+	if (!Number.isFinite(checked) || checked > Date.now() + 1e3) fail$1(409, "Данные проверки цены некорректны.");
 	validateQuote(request.quote, request);
 	return request.quote;
 }
@@ -5390,13 +5398,13 @@ function clientView(request) {
 }
 async function ownedRequest(tx, session, id) {
 	const { rows } = await tx.query("SELECT * FROM travel_requests WHERE id=?", [id]);
-	if (!rows[0]) fail(404, "Заявка не найдена.");
+	if (!rows[0]) fail$1(404, "Заявка не найдена.");
 	const request = requestFromRow(rows[0]);
-	if (session.role !== "manager" && request.clientId !== session.clientId) fail(404, "Заявка не найдена.");
+	if (session.role !== "manager" && request.clientId !== session.clientId) fail$1(404, "Заявка не найдена.");
 	return request;
 }
 function assertRevision(request, expected) {
-	if (request.revision !== expected) fail(409, "Заявка уже изменена. Обновите её перед сохранением.");
+	if (request.revision !== expected) fail$1(409, "Заявка уже изменена. Обновите её перед сохранением.");
 }
 async function readWorkspace(db, session, env) {
 	if (session.role !== "manager") {
@@ -5447,9 +5455,9 @@ async function readWorkspace(db, session, env) {
 }
 async function mutateWorkspace(db, session, env, outbox, body) {
 	const parsed = actionSchema.safeParse(body);
-	if (!parsed.success) fail(400, "Проверьте заполненные поля. " + parsed.error.issues.slice(0, 3).map((i) => i.path.join(".") + ": " + i.message).join("; "));
+	if (!parsed.success) fail$1(400, "Проверьте заполненные поля. " + parsed.error.issues.slice(0, 3).map((i) => i.path.join(".") + ": " + i.message).join("; "));
 	const data = parsed.data;
-	if (["select_request", "agree_request"].includes(data.action) && session.role !== "client") fail(403, "Выбор и согласование выполняет клиент в своём кабинете.");
+	if (["select_request", "agree_request"].includes(data.action) && session.role !== "client") fail$1(403, "Выбор и согласование выполняет клиент в своём кабинете.");
 	if (![
 		"create_request",
 		"select_request",
@@ -5487,8 +5495,8 @@ async function mutateWorkspace(db, session, env, outbox, body) {
 			const existing = await tx.query("SELECT * FROM travel_requests WHERE id=?", [data.id]);
 			if (existing.rows[0]) {
 				const r = requestFromRow(existing.rows[0]);
-				if (r.clientId !== session.clientId) fail(409, "Идентификатор заявки уже используется. Начните новую заявку.");
-				if (json(r.input) !== json(data.input) || r.customerEmail !== data.customerEmail || r.customerName !== data.customerName || r.notes !== data.notes || r.contact !== data.contact) fail(409, "Эта заявка уже сохранена с другими данными. Создайте новую заявку.");
+				if (r.clientId !== session.clientId) fail$1(409, "Идентификатор заявки уже используется. Начните новую заявку.");
+				if (json(r.input) !== json(data.input) || r.customerEmail !== data.customerEmail || r.customerName !== data.customerName || r.notes !== data.notes || r.contact !== data.contact) fail$1(409, "Эта заявка уже сохранена с другими данными. Создайте новую заявку.");
 				return {
 					id: r.id,
 					status: r.status,
@@ -5497,7 +5505,7 @@ async function mutateWorkspace(db, session, env, outbox, body) {
 				};
 			}
 			const count = await tx.query("SELECT COUNT(*) AS total FROM travel_requests WHERE client_id=? AND created_at>?", [session.clientId, (/* @__PURE__ */ new Date(Date.now() - 36e5)).toISOString()]);
-			if (Number(count.rows[0].total) >= 12) fail(429, "Слишком много заявок за короткое время. Повторите позже.");
+			if (Number(count.rows[0].total) >= 12) fail$1(429, "Слишком много заявок за короткое время. Повторите позже.");
 			const timestamp = now(), candidates = makeCandidates(await getCatalog(tx), data.input);
 			const r = {
 				id: data.id,
@@ -5538,7 +5546,7 @@ async function mutateWorkspace(db, session, env, outbox, body) {
 				0,
 				timestamp,
 				timestamp
-			])).changes !== 1) fail(409, "Заявка уже сохраняется. Обновите список заявок.");
+			])).changes !== 1) fail$1(409, "Заявка уже сохраняется. Обновите список заявок.");
 			await saveVersion(tx, r, "create_request", session.role);
 			const email = await enqueueMail(tx, env, r, "manager", "new");
 			return {
@@ -5554,9 +5562,9 @@ async function mutateWorkspace(db, session, env, outbox, body) {
 		assertRevision(r, data.revision);
 		const previousRevision = r.revision;
 		if (data.action === "send_client_email") {
-			if (!["selection", "proposal"].includes(r.status)) fail(409, "Письмо клиенту можно отправить после публикации идеи или подтверждения полной стоимости.");
+			if (!["selection", "proposal"].includes(r.status)) fail$1(409, "Письмо клиенту можно отправить после публикации идеи или подтверждения полной стоимости.");
 			validatePublished(r);
-			if (r.status === "proposal") currentQuote(r);
+			if (r.status === "proposal") currentQuote$1(r);
 			return {
 				ok: true,
 				email: await enqueueMail(tx, env, r, "client", `revision-${r.revision}`)
@@ -5564,21 +5572,30 @@ async function mutateWorkspace(db, session, env, outbox, body) {
 		}
 		if (data.action === "save_internal_note") r.internalNote = data.internalNote;
 		else if (data.action === "regenerate_candidates") {
-			if (!["review", "selection"].includes(r.status)) fail(409, "Верните заявку на проверку маршрута перед повторным подбором.");
+			if (!["review", "selection"].includes(r.status)) fail$1(409, "Верните заявку на проверку маршрута перед повторным подбором.");
 			r.candidates = makeCandidates(await getCatalog(tx), r.input);
 		} else if (data.action === "save_candidate") {
 			const idx = r.candidates.findIndex((c) => c.id === data.candidateId);
-			if (idx === -1) fail(404, "Вариант не найден.");
+			if (idx === -1) fail$1(404, "Вариант не найден.");
 			const j = validateJourney({
 				...data.journey,
 				updatedAt: now()
 			});
-			if (!j.active) fail(400, "Вариант заявки должен быть активным.");
-			r.candidates[idx] = candidateFromRank(rankJourneys([j], r.input)[0], data.candidateId);
-		} else if (data.action === "publish_candidate") {
-			if (!["review", "selection"].includes(r.status)) fail(409, "Верните заявку на проверку маршрута перед заменой предложения.");
+			if (!j.active) fail$1(400, "Вариант заявки должен быть активным.");
+			const previous = r.candidates[idx];
+			r.candidates[idx] = {
+				...candidateFromRank(rankJourneys([j], r.input)[0], data.candidateId),
+				...typeof previous.reviewNote === "string" ? { reviewNote: previous.reviewNote } : {}
+			};
+		} else if (data.action === "save_candidate_note") {
 			const candidate = r.candidates.find((c) => c.id === data.candidateId);
-			if (!candidate) fail(404, "Вариант не найден.");
+			if (!candidate) fail$1(404, "Вариант не найден.");
+			candidate.reviewNote = data.reviewNote;
+		} else if (data.action === "publish_candidate") {
+			if (!["review", "selection"].includes(r.status)) fail$1(409, "Верните заявку на проверку маршрута перед заменой предложения.");
+			const candidate = r.candidates.find((c) => c.id === data.candidateId);
+			if (!candidate) fail$1(404, "Вариант не найден.");
+			candidate.reviewNote = data.managerNote;
 			r.journey = structuredClone(candidate.journey);
 			r.journeyId = r.journey.id;
 			r.candidateId = candidate.id;
@@ -5587,14 +5604,14 @@ async function mutateWorkspace(db, session, env, outbox, body) {
 			r.quote = null;
 			validatePublished(r);
 		} else if (data.action === "select_request") {
-			if (r.status !== "selection") fail(409, "Выбрать можно только идею, опубликованную менеджером.");
+			if (r.status !== "selection") fail$1(409, "Выбрать можно только идею, опубликованную менеджером.");
 			validatePublished(r);
 			r.status = "pricing";
 			r.quote = null;
 		} else if (data.action === "agree_request") {
-			if (r.status !== "proposal") fail(409, "Согласовать можно только актуальное предложение с подтверждённой стоимостью.");
+			if (r.status !== "proposal") fail$1(409, "Согласовать можно только актуальное предложение с подтверждённой стоимостью.");
 			validatePublished(r);
-			currentQuote(r);
+			currentQuote$1(r);
 			r.status = "agreed";
 		} else if (data.action === "update_request") {
 			if (!{
@@ -5612,14 +5629,14 @@ async function mutateWorkspace(db, session, env, outbox, body) {
 					"review"
 				],
 				agreed: ["agreed", "review"]
-			}[r.status]?.includes(data.status)) fail(409, "Недопустимый переход этапа. Публикация идеи, выбор и согласование выполняются отдельными действиями.");
-			if (data.journeyId !== void 0 && data.journeyId !== r.journeyId) fail(409, "Выберите маршрут из вариантов заявки и опубликуйте его отдельным действием.");
+			}[r.status]?.includes(data.status)) fail$1(409, "Недопустимый переход этапа. Публикация идеи, выбор и согласование выполняются отдельными действиями.");
+			if (data.journeyId !== void 0 && data.journeyId !== r.journeyId) fail$1(409, "Выберите маршрут из вариантов заявки и опубликуйте его отдельным действием.");
 			r.managerNote = data.managerNote;
 			if (data.status === "proposal") {
 				validatePublished(r);
 				r.quote = validateQuote(data.quote, r);
 			} else if (data.status === "agreed") {
-				if (json(data.quote) !== json(r.quote)) fail(409, "Согласованное предложение нельзя менять. Верните заявку на проверку и запросите новое согласование.");
+				if (json(data.quote) !== json(r.quote)) fail$1(409, "Согласованное предложение нельзя менять. Верните заявку на проверку и запросите новое согласование.");
 			} else if ([
 				"review",
 				"pricing",
@@ -5641,7 +5658,1370 @@ async function mutateWorkspace(db, session, env, outbox, body) {
 	});
 }
 //#endregion
+//#region server/proposal-data.mjs
+var fail = (status, message) => {
+	throw Object.assign(new Error(message), { status });
+};
+var uuid = stringType().uuid();
+var quoteSchema = objectType({
+	amount: numberType().int().positive().max(1e8),
+	source: stringType().url().refine((value) => {
+		try {
+			const url = new URL(value);
+			return url.protocol === "https:" && !url.username && !url.password;
+		} catch {
+			return false;
+		}
+	}),
+	checkedAt: stringType(),
+	travelDate: stringType(),
+	scope: stringType().trim().min(15).max(4e3),
+	availability: stringType().trim().min(10).max(2e3),
+	terms: stringType().trim().min(10).max(4e3),
+	validUntil: stringType()
+});
+var descriptiveKeys = [
+	"id",
+	"title",
+	"subtitle",
+	"country",
+	"destinations",
+	"format",
+	"tags",
+	"minNights",
+	"maxNights",
+	"baseNights",
+	"changes",
+	"needsReview",
+	"overview",
+	"tradeoff",
+	"hotel",
+	"program",
+	"includes",
+	"excludes",
+	"logistics",
+	"season",
+	"documents",
+	"updatedAt"
+];
+var clientInputKeys = [
+	"formats",
+	"destination",
+	"departure",
+	"date",
+	"nights",
+	"adults",
+	"children",
+	"priorities",
+	"pace",
+	"cabin",
+	"directOnly",
+	"maxHours",
+	"special",
+	"hotelChanges"
+];
+function parseProposalQuery(id, params) {
+	if (!uuid.safeParse(id).success) fail(400, "Некорректный номер заявки.");
+	const allowed = new Set([
+		"mode",
+		"revision",
+		"candidateId"
+	]);
+	for (const key of params.keys()) if (!allowed.has(key) || params.getAll(key).length !== 1) fail(400, "Некорректные параметры PDF.");
+	const mode = params.get("mode"), revisionText = params.get("revision"), candidateId = params.get("candidateId");
+	if (!["review", "client"].includes(mode)) fail(400, "Укажите режим PDF: review или client.");
+	if (!revisionText || !/^(0|[1-9][0-9]*)$/.test(revisionText) || !Number.isSafeInteger(Number(revisionText))) fail(400, "Укажите сохранённую версию заявки.");
+	if (params.has("candidateId") && (mode !== "review" || !uuid.safeParse(candidateId).success)) fail(400, "Вариант можно указывать только для PDF на проверку.");
+	return {
+		id,
+		mode,
+		revision: Number(revisionText),
+		candidateId
+	};
+}
+function savedJson(value, label) {
+	try {
+		return JSON.parse(value);
+	} catch {
+		fail(409, `Не удалось прочитать сохранённые данные: ${label}.`);
+	}
+}
+function currentQuote(value, input, status, mode, clock) {
+	if (!["proposal", "agreed"].includes(status) || !value) return null;
+	let decoded;
+	try {
+		decoded = JSON.parse(value);
+	} catch {
+		return null;
+	}
+	const parsed = quoteSchema.safeParse(decoded);
+	if (!parsed.success) return null;
+	const q = parsed.data, date = inputSchema.shape.date.safeParse(q.travelDate), timestamp = clock.getTime();
+	const checked = Date.parse(q.checkedAt), expiry = Date.parse(q.validUntil), today = clock.toISOString().slice(0, 10);
+	if (!date.success || !q.travelDate || q.travelDate < today || q.amount > input.budget) return null;
+	if (input.date && q.travelDate !== input.date) return null;
+	if (!Number.isFinite(checked) || checked > timestamp || !Number.isFinite(expiry) || expiry <= timestamp) return null;
+	if (expiry > Date.parse(q.travelDate + "T23:59:59.999Z")) return null;
+	const result = {
+		amount: q.amount,
+		checkedAt: q.checkedAt,
+		travelDate: q.travelDate,
+		scope: q.scope,
+		availability: q.availability,
+		validUntil: q.validUntil,
+		terms: q.terms
+	};
+	if (mode === "review") result.source = q.source;
+	return result;
+}
+/** Read one saved request; nothing in this function changes its status, snapshot, or revision. */
+async function loadProposalModel(db, session, options, { clock = /* @__PURE__ */ new Date() } = {}) {
+	requireManager(session);
+	const { id, mode, revision, candidateId } = options;
+	const params = new URLSearchParams({
+		mode: String(mode),
+		revision: String(revision)
+	});
+	if (candidateId !== null && candidateId !== void 0) params.set("candidateId", String(candidateId));
+	parseProposalQuery(id, params);
+	const { rows } = await db.query("SELECT id,input_json,journey_json,candidate_id,status,customer_name,manager_note,quote_json,candidates_json,revision FROM travel_requests WHERE id=?", [id]);
+	const row = rows[0];
+	if (!row) fail(404, "Заявка не найдена.");
+	if (row.revision !== revision) fail(409, "Заявка уже изменена. Обновите её и сформируйте PDF из актуальной сохранённой версии.");
+	if (mode === "client" && ![
+		"selection",
+		"pricing",
+		"proposal",
+		"agreed"
+	].includes(row.status)) fail(409, "Сначала опубликуйте одобренный вариант для клиента.");
+	const inputResult = inputSchema.safeParse(savedJson(row.input_json, "анкета"));
+	if (!inputResult.success) fail(409, "Сохранённая анкета требует проверки перед подготовкой PDF.");
+	const input = inputResult.data;
+	let selected, reviewNote;
+	if (mode === "review" && candidateId) {
+		const candidates = savedJson(row.candidates_json, "варианты");
+		const candidate = Array.isArray(candidates) ? candidates.find((item) => item?.id === candidateId) : null;
+		if (!candidate) fail(404, "Выбранный вариант не принадлежит этой заявке.");
+		selected = candidate.journey;
+		if (candidate.reviewNote !== void 0) {
+			const savedNote = stringType().max(4e3).safeParse(candidate.reviewNote);
+			if (!savedNote.success) fail(409, "Сохранённый комментарий к варианту требует проверки перед подготовкой PDF.");
+			reviewNote = savedNote.data;
+		} else reviewNote = candidateId === row.candidate_id ? String(row.manager_note || "") : "";
+	} else {
+		if (!row.journey_json) fail(409, mode === "review" ? "Выберите сохранённый вариант для проверки." : "Опубликованный маршрут ещё не готов.");
+		if (![
+			"selection",
+			"pricing",
+			"proposal",
+			"agreed"
+		].includes(row.status)) fail(409, "Для PDF без варианта нужен опубликованный маршрут.");
+		selected = savedJson(row.journey_json, "опубликованный маршрут");
+	}
+	const journeyResult = journeySchema.safeParse(selected);
+	if (!journeyResult.success) fail(409, "Сохранённый маршрут требует проверки перед подготовкой PDF.");
+	const journey = journeyResult.data;
+	const ranked = mode === "review" ? rankJourneys([{
+		...journey,
+		active: true
+	}], input)[0] : null;
+	const safeJourney = mode === "review" ? journey : Object.fromEntries(descriptiveKeys.map((key) => [key, journey[key]]));
+	return {
+		id: row.id,
+		revision: row.revision,
+		customerName: String(row.customer_name),
+		input: mode === "review" ? input : Object.fromEntries(clientInputKeys.map((key) => [key, input[key]])),
+		journey: safeJourney,
+		managerNote: reviewNote !== void 0 ? reviewNote : String(row.manager_note || ""),
+		quote: candidateId ? null : currentQuote(row.quote_json, input, row.status, mode, clock),
+		mode,
+		generatedAt: clock.toISOString(),
+		issues: ranked?.issues || [],
+		review: ranked?.review || [],
+		estimate: ranked?.estimate || null
+	};
+}
+//#endregion
+//#region server/proposal-pdf.mjs
+var PALETTE = {
+	ivory: "#F5F1E7",
+	paper: "#FCFAF5",
+	sand: "#E4DAC7",
+	taupe: "#84796A",
+	olive: "#414A32",
+	ink: "#282D24",
+	muted: "#706D61",
+	gold: "#B39965",
+	line: "#D8D0BF",
+	light: "#EBE7DC",
+	white: "#FFFFFF",
+	warning: "#785B33"
+};
+var PAGE = {
+	width: 841.89,
+	height: 595.28,
+	margin: 42,
+	bottom: 540
+};
+var BODY_WIDTH = PAGE.width - PAGE.margin * 2;
+var MAX_PAGES = 180;
+var MAX_BYTES = 12 * 1024 * 1024;
+var assetCache = /* @__PURE__ */ new Map();
+var safeText = (value) => String(value ?? "").replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "").replace(/[\u00A0\u202F]/g, " ").replace(/[\u2010-\u2015\u2212]/g, "-");
+var canonical = (value) => safeText(value).trim().toLocaleLowerCase("ru-RU").replaceAll("ё", "е");
+var rubles = (value) => Number.isFinite(Number(value)) ? `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(Number(value)).replace(/[\u00A0\u202F]/g, " ")} ₽` : "Не указана";
+var displayDate = (value) => {
+	if (!value) return "Дата уточняется";
+	const parsed = new Date(value);
+	return Number.isNaN(parsed.getTime()) ? safeText(value) : new Intl.DateTimeFormat("ru-RU", {
+		day: "2-digit",
+		month: "long",
+		year: "numeric",
+		timeZone: "UTC"
+	}).format(parsed);
+};
+var displayDateTime = (value) => {
+	const parsed = new Date(value);
+	return Number.isNaN(parsed.getTime()) ? safeText(value) : `${new Intl.DateTimeFormat("ru-RU", {
+		day: "2-digit",
+		month: "2-digit",
+		year: "numeric",
+		hour: "2-digit",
+		minute: "2-digit",
+		timeZone: "UTC"
+	}).format(parsed)} UTC`;
+};
+var httpsUrl = (value) => {
+	try {
+		const url = new URL(value);
+		return url.protocol === "https:" && !url.username && !url.password ? url.href : null;
+	} catch {
+		return null;
+	}
+};
+var sourceHost = (value) => {
+	try {
+		return new URL(value).hostname.replace(/^www\./, "");
+	} catch {
+		return "Открыть источник";
+	}
+};
+var formatNames = {
+	beach: "Острова и море",
+	city: "Города и культура",
+	multi: "Несколько мест",
+	safari: "Сафари и природа",
+	cruise: "Круизы и экспедиции"
+};
+var priorityNames = {
+	quiet: "Тишина и приватность",
+	food: "Гастрономия",
+	culture: "Культура",
+	nature: "Природа",
+	comfort: "Комфорт",
+	activity: "Новые впечатления"
+};
+var paceNames = {
+	calm: "Спокойный",
+	balanced: "Сбалансированный",
+	active: "Активный"
+};
+async function assetsAt(root) {
+	const key = resolve(root);
+	if (!assetCache.has(key)) assetCache.set(key, Promise.all([
+		readFile(resolve(key, "tiare-pdf-title.ttf")),
+		readFile(resolve(key, "tiare-pdf-title-italic.ttf")),
+		readFile(resolve(key, "tiare-pdf-body.ttf")),
+		readFile(resolve(key, "tiare-pdf-cover.jpg")),
+		readFile(resolve(key, "pdf-geography.json"), "utf8")
+	]).then(([title, italic, body, cover, geography]) => ({
+		title,
+		italic,
+		body,
+		cover,
+		geography: JSON.parse(geography)
+	})).catch((error) => {
+		assetCache.delete(key);
+		throw error;
+	}));
+	return assetCache.get(key);
+}
+function flower(doc, x, y, r, { opacity = 1, fill = PALETTE.paper, stroke = PALETTE.olive } = {}) {
+	doc.save().opacity(opacity).translate(x, y);
+	for (let i = 0; i < 7; i++) {
+		doc.save().rotate(i * 360 / 7);
+		doc.moveTo(0, 0).bezierCurveTo(-r * .24, -r * .18, -r * .48, -r * .69, -r * .12, -r * .96).bezierCurveTo(r * .22, -r * 1.08, r * .47, -r * .59, r * .15, -r * .17).bezierCurveTo(r * .09, -r * .07, r * .03, 0, 0, 0).fillAndStroke(fill, stroke).restore();
+	}
+	doc.circle(0, 0, r * .105).fill(PALETTE.gold).restore();
+}
+function makeLayout(doc, model) {
+	const pages = [];
+	let current = null;
+	const setFont = (font = "body", size = 11) => doc.font(font).fontSize(size);
+	const widthOf = (text, font = "body", size = 11) => {
+		setFont(font, size);
+		return doc.widthOfString(safeText(text));
+	};
+	function wrap(value, width, font = "body", size = 11) {
+		const paragraphs = safeText(value).split("\n");
+		const output = [];
+		setFont(font, size);
+		for (const paragraph of paragraphs) {
+			const words = paragraph.trim().split(/\s+/).filter(Boolean);
+			if (!words.length) {
+				output.push("");
+				continue;
+			}
+			let line = "";
+			for (const word of words) {
+				const candidate = line ? `${line} ${word}` : word;
+				if (doc.widthOfString(candidate) <= width) {
+					line = candidate;
+					continue;
+				}
+				if (line) {
+					output.push(line);
+					line = "";
+				}
+				if (doc.widthOfString(word) <= width) {
+					line = word;
+					continue;
+				}
+				for (const character of Array.from(word)) {
+					if (line && doc.widthOfString(line + character) > width) {
+						output.push(line);
+						line = "";
+					}
+					line += character;
+				}
+			}
+			if (line) output.push(line);
+		}
+		return output.length ? output : [""];
+	}
+	function text(value, x, y, { font = "body", size = 11, color = PALETTE.ink, width = BODY_WIDTH, align = "left", link } = {}) {
+		setFont(font, size);
+		doc.fillColor(color);
+		const options = {
+			lineBreak: false,
+			align,
+			width
+		};
+		const safeLink = httpsUrl(link);
+		if (safeLink) options.link = safeLink;
+		doc.text(safeText(value), x, y, options);
+	}
+	function wrapped(value, x, y, width, { font = "body", size = 11, color = PALETTE.ink, leading = size * 1.45, link } = {}) {
+		const lines = wrap(value, width, font, size);
+		for (const line of lines) {
+			text(line, x, y, {
+				font,
+				size,
+				color,
+				width,
+				link
+			});
+			y += leading;
+		}
+		return y;
+	}
+	function base({ cover = false, final = false } = {}) {
+		if (pages.length >= MAX_PAGES) throw Object.assign(/* @__PURE__ */ new Error("Предложение превышает 180 страниц. Сократите повторяющиеся описания перед экспортом."), { status: 413 });
+		doc.addPage({
+			size: [PAGE.width, PAGE.height],
+			margin: 0
+		});
+		doc.rect(0, 0, PAGE.width, PAGE.height).fill(final ? "#F0EEE4" : PALETTE.ivory);
+		pages.push({
+			cover,
+			final
+		});
+		if (!cover) {
+			flower(doc, 53, 39, 13, { fill: PALETTE.paper });
+			text("Tiare Travel", 75, 25, {
+				font: "title",
+				size: 24,
+				color: PALETTE.olive
+			});
+			text(model.mode === "review" ? "РАБОЧАЯ ВЕРСИЯ · ДЛЯ ПРОВЕРКИ" : "PRIVATE JOURNEY", 492, 33, {
+				size: 8.2,
+				color: model.mode === "review" ? PALETTE.warning : PALETTE.muted,
+				width: 308,
+				align: "right"
+			});
+			doc.moveTo(PAGE.margin, 68).lineTo(PAGE.width - PAGE.margin, 68).lineWidth(.6).stroke(PALETTE.line);
+		}
+	}
+	function page(title, { subtitle = "", continued = false, section = title } = {}) {
+		base();
+		current = {
+			title,
+			subtitle,
+			section,
+			y: 87,
+			continued
+		};
+		const heading = continued ? `${title} · продолжение` : title;
+		current.y = wrapped(heading, PAGE.margin, current.y, BODY_WIDTH, {
+			font: "title",
+			size: 29,
+			color: PALETTE.olive,
+			leading: 33
+		}) + 7;
+		if (subtitle && !continued) current.y = wrapped(subtitle, PAGE.margin, current.y, BODY_WIDTH, {
+			size: 9.5,
+			color: PALETTE.muted,
+			leading: 14
+		}) + 14;
+		else current.y += 8;
+		return current;
+	}
+	function next() {
+		const previous = current;
+		page(previous.title, {
+			section: previous.section,
+			continued: true
+		});
+	}
+	function ensure(height) {
+		if (!current) throw new Error("PDF layout has no current page.");
+		if (current.y + height > PAGE.bottom) next();
+	}
+	function gap(height = 12) {
+		ensure(height);
+		current.y += height;
+	}
+	function paragraph(value, { label, font = "body", size = 11, color = PALETTE.ink, leading = size * 1.48, after = 14, link } = {}) {
+		if (label) {
+			ensure(36);
+			text(label, PAGE.margin, current.y, {
+				font: "body",
+				size: 9,
+				color: PALETTE.muted
+			});
+			current.y += 18;
+		}
+		const lines = wrap(value, BODY_WIDTH, font, size);
+		for (const line of lines) {
+			ensure(leading + 2);
+			text(line, PAGE.margin, current.y, {
+				font,
+				size,
+				color,
+				link
+			});
+			current.y += leading;
+		}
+		current.y += after;
+	}
+	function label(value) {
+		ensure(32);
+		text(value, PAGE.margin, current.y, {
+			font: "title",
+			size: 20,
+			color: PALETTE.olive
+		});
+		current.y += 30;
+	}
+	function unitsForCard({ eyebrow, title, titleSize = 22, sections = [], footer }, width) {
+		const units = [];
+		const add = (value, { font = "body", size = 10.5, color = PALETTE.ink, leading = size * 1.43, after = 7, link } = {}) => {
+			if (value === void 0 || value === null || value === "") return;
+			const lines = wrap(value, width, font, size);
+			for (let i = 0; i < lines.length; i++) units.push({
+				text: lines[i],
+				font,
+				size,
+				color,
+				leading,
+				link,
+				last: i === lines.length - 1,
+				space: i === lines.length - 1 ? after : 0
+			});
+		};
+		add(eyebrow, {
+			size: 8.5,
+			color: PALETTE.muted,
+			leading: 12,
+			after: 6
+		});
+		add(title, {
+			font: "title",
+			size: titleSize,
+			color: PALETTE.olive,
+			leading: titleSize * 1.15,
+			after: 10
+		});
+		for (const section of sections) {
+			if (section.label) add(section.label, {
+				size: 8.5,
+				color: PALETTE.muted,
+				leading: 12,
+				after: 4
+			});
+			add(section.text, {
+				font: section.font ?? "body",
+				size: section.size ?? 10.5,
+				color: section.color ?? PALETTE.ink,
+				link: section.link,
+				after: section.after ?? 9
+			});
+		}
+		add(footer, {
+			size: 8.5,
+			color: PALETTE.muted,
+			leading: 12,
+			after: 0
+		});
+		return units;
+	}
+	function card(config, { accent = PALETTE.gold } = {}) {
+		const inset = 19;
+		const units = unitsForCard(config, BODY_WIDTH - inset * 2 - 4);
+		const fullHeight = 27 + units.reduce((sum, unit) => sum + unit.leading + unit.space, 0);
+		const freshStart = 87 + wrap(`${current.title} · продолжение`, BODY_WIDTH, "title", 29).length * 33 + 15;
+		if (fullHeight <= PAGE.bottom - freshStart && current.y + fullHeight > PAGE.bottom) next();
+		let index = 0, part = 0;
+		while (index < units.length) {
+			const continuation = part > 0;
+			const topPadding = continuation ? 31 : 17;
+			ensure(topPadding + Math.min(3, units.length - index) * 16 + 17);
+			let available = PAGE.bottom - current.y - topPadding - 14;
+			let count = 0, height = 0;
+			while (index + count < units.length) {
+				const unit = units[index + count], unitHeight = unit.leading + unit.space;
+				if (height + unitHeight > available && count) break;
+				if (height + unitHeight > available && !count) {
+					next();
+					available = PAGE.bottom - current.y - topPadding - 14;
+					continue;
+				}
+				height += unitHeight;
+				count++;
+			}
+			if (!count) throw new Error("PDF card cannot fit a text line.");
+			const tail = units.length - index - count;
+			if (tail > 0 && tail < 4 && count > 5) {
+				const move = 4 - tail;
+				for (let i = 0; i < move; i++) {
+					const unit = units[index + count - 1];
+					height -= unit.leading + unit.space;
+					count--;
+				}
+			}
+			const boxHeight = topPadding + height + 10;
+			doc.roundedRect(PAGE.margin, current.y, BODY_WIDTH, boxHeight, 3).fill(PALETTE.paper);
+			doc.rect(PAGE.margin, current.y, 2, boxHeight).fill(accent);
+			let y = current.y + 17;
+			if (continuation) {
+				text("ПРОДОЛЖЕНИЕ", PAGE.margin + inset + 4, y - 2, {
+					size: 7.5,
+					color: PALETTE.taupe
+				});
+				y += 14;
+			}
+			for (let i = 0; i < count; i++) {
+				const unit = units[index + i];
+				text(unit.text, PAGE.margin + inset + 4, y, {
+					font: unit.font,
+					size: unit.size,
+					color: unit.color,
+					width: BODY_WIDTH - inset * 2 - 4,
+					link: unit.link
+				});
+				y += unit.leading + unit.space;
+			}
+			current.y += boxHeight + 12;
+			index += count;
+			part++;
+			if (index < units.length) next();
+		}
+	}
+	function cardGrid(configs, { columns = 2, accent = PALETTE.gold } = {}) {
+		if (configs.length === 1) {
+			card(configs[0], { accent });
+			return;
+		}
+		const gutter = 14, width = (BODY_WIDTH - gutter * (columns - 1)) / columns, inset = 17;
+		const grouped = configs.map((config) => unitsForCard(config, width - inset * 2));
+		const height = Math.max(...grouped.map((units) => 27 + units.reduce((sum, unit) => sum + unit.leading + unit.space, 0)));
+		const freshStart = 87 + wrap(`${current.title} · продолжение`, BODY_WIDTH, "title", 29).length * 33 + 15;
+		if (height > PAGE.bottom - freshStart) {
+			for (const config of configs) card(config, { accent });
+			return;
+		}
+		ensure(height + 1);
+		const top = current.y;
+		for (let column = 0; column < grouped.length; column++) {
+			const x = PAGE.margin + column * (width + gutter);
+			doc.roundedRect(x, top, width, height, 3).fill(PALETTE.paper);
+			doc.rect(x, top, 2, height).fill(accent);
+			let y = top + 17;
+			for (const unit of grouped[column]) {
+				text(unit.text, x + inset, y, {
+					font: unit.font,
+					size: unit.size,
+					color: unit.color,
+					width: width - inset * 2,
+					link: unit.link
+				});
+				y += unit.leading + unit.space;
+			}
+		}
+		current.y = top + height + 12;
+	}
+	function factGrid(items) {
+		const gutter = 26, width = (BODY_WIDTH - gutter) / 2;
+		for (let index = 0; index < items.length; index += 2) {
+			const pair = items.slice(index, index + 2).map(([name, value]) => ({
+				name,
+				lines: wrap(value, width, "body", 10.5)
+			}));
+			const height = 13 + Math.max(...pair.map((item) => item.lines.length)) * 15.5 + 11;
+			if (height > 250) {
+				for (const item of items.slice(index, index + 2)) paragraph(item[1], { label: item[0] });
+				continue;
+			}
+			ensure(height);
+			for (let column = 0; column < pair.length; column++) {
+				const x = PAGE.margin + column * (width + gutter), item = pair[column];
+				text(item.name, x, current.y, {
+					size: 8.5,
+					color: PALETTE.muted,
+					width
+				});
+				let y = current.y + 13;
+				for (const line of item.lines) {
+					text(line, x, y, {
+						size: 10.5,
+						color: PALETTE.ink,
+						width
+					});
+					y += 15.5;
+				}
+				doc.moveTo(x, current.y + height - 5).lineTo(x + width, current.y + height - 5).lineWidth(.45).stroke(PALETTE.line);
+			}
+			current.y += height;
+		}
+		current.y += 9;
+	}
+	function rows(items, { valueColor = PALETTE.ink, labelWidth = 195 } = {}) {
+		for (const [name, value] of items) {
+			const nameLines = wrap(name, labelWidth, "body", 9.5), valueLines = wrap(value, BODY_WIDTH - labelWidth - 24, "body", 10.5);
+			const height = Math.max(nameLines.length, valueLines.length) * 15.5 + 17;
+			if (height > 250) {
+				paragraph(value, {
+					label: name,
+					after: 12
+				});
+				continue;
+			}
+			ensure(height);
+			for (let i = 0; i < nameLines.length; i++) text(nameLines[i], PAGE.margin, current.y + i * 15.5, {
+				size: 9.5,
+				color: PALETTE.muted,
+				width: labelWidth
+			});
+			for (let i = 0; i < valueLines.length; i++) text(valueLines[i], PAGE.margin + labelWidth + 24, current.y + i * 15.5, {
+				size: 10.5,
+				color: valueColor,
+				width: BODY_WIDTH - labelWidth - 24
+			});
+			current.y += height;
+			doc.moveTo(PAGE.margin, current.y - 6).lineTo(PAGE.width - PAGE.margin, current.y - 6).lineWidth(.45).stroke(PALETTE.line);
+		}
+		current.y += 9;
+	}
+	function bullets(items, { color = PALETTE.ink } = {}) {
+		for (const value of items ?? []) {
+			const lines = wrap(value, BODY_WIDTH - 22, "body", 10.5);
+			let first = true;
+			for (const line of lines) {
+				ensure(17);
+				if (first) {
+					doc.circle(PAGE.margin + 3, current.y + 6, 1.7).fill(PALETTE.gold);
+					first = false;
+				}
+				text(line, PAGE.margin + 16, current.y, {
+					size: 10.5,
+					color,
+					width: BODY_WIDTH - 22
+				});
+				current.y += 15.5;
+			}
+			current.y += 9;
+		}
+	}
+	function footers() {
+		const count = pages.length;
+		for (let i = 0; i < count; i++) {
+			doc.switchToPage(i);
+			const { cover } = pages[i], color = cover ? PALETTE.taupe : PALETTE.muted;
+			if (!cover) doc.moveTo(PAGE.margin, 557).lineTo(PAGE.width - PAGE.margin, 557).lineWidth(.5).stroke(PALETTE.line);
+			text(`TIARE TRAVEL · ЗАЯВКА ${safeText(model.id).slice(0, 8).toUpperCase()} · ВЕРСИЯ ${model.revision}`, PAGE.margin, 571, {
+				size: 7.2,
+				color,
+				width: 590
+			});
+			text(`${String(i + 1).padStart(2, "0")} / ${String(count).padStart(2, "0")}`, PAGE.width - 104, 570, {
+				size: 8,
+				color,
+				width: 62,
+				align: "right"
+			});
+		}
+	}
+	return {
+		doc,
+		model,
+		pages,
+		base,
+		page,
+		next,
+		ensure,
+		gap,
+		paragraph,
+		label,
+		card,
+		cardGrid,
+		factGrid,
+		rows,
+		bullets,
+		footers,
+		wrap,
+		text,
+		wrapped,
+		widthOf,
+		get y() {
+			return current?.y ?? 0;
+		},
+		set y(value) {
+			current.y = value;
+		}
+	};
+}
+function coverPage(layout, assets) {
+	const { doc, model } = layout, j = model.journey, input = model.input;
+	layout.base({ cover: true });
+	doc.save().rect(402, 0, PAGE.width - 402, PAGE.height).clip().image(assets.cover, 402, 0, {
+		cover: [PAGE.width - 402, PAGE.height],
+		align: "center",
+		valign: "center"
+	}).restore();
+	doc.rect(0, 0, 408, PAGE.height).fill(PALETTE.ivory);
+	doc.rect(399, 0, 9, PAGE.height).fill(PALETTE.sand);
+	flower(doc, 56, 49, 19, { fill: PALETTE.paper });
+	layout.text("Tiare", 88, 24, {
+		font: "title",
+		size: 33,
+		color: PALETTE.olive
+	});
+	layout.text("TRAVEL", 89, 57, {
+		size: 7.4,
+		color: PALETTE.muted
+	});
+	doc.moveTo(42, 105).lineTo(361, 105).lineWidth(.65).stroke(PALETTE.line);
+	const status = model.mode === "review" ? "РАБОЧАЯ ВЕРСИЯ ДЛЯ МЕНЕДЖЕРА" : model.quote ? "ИНДИВИДУАЛЬНОЕ ПРЕДЛОЖЕНИЕ" : "ИДЕЯ ВАШЕГО ПУТЕШЕСТВИЯ";
+	layout.wrapped(status, 42, 126, 320, {
+		size: 8.7,
+		color: model.mode === "review" ? PALETTE.warning : PALETTE.muted,
+		leading: 13
+	});
+	let titleSize = 43, titleLines = layout.wrap(j.title, 321, "title", titleSize);
+	while (titleLines.length * titleSize * 1.04 > 163 && titleSize > 12) {
+		titleSize -= .5;
+		titleLines = layout.wrap(j.title, 321, "title", titleSize);
+	}
+	let y = 180;
+	for (const line of titleLines) {
+		layout.text(line, 42, y, {
+			font: "title",
+			size: titleSize,
+			color: PALETTE.olive,
+			width: 321
+		});
+		y += titleSize * 1.04;
+	}
+	y += 18;
+	let subSize = 19, subtitleLines = layout.wrap(j.subtitle, 318, "italic", subSize);
+	while (subtitleLines.length * subSize * 1.15 > 468 - y && subSize > 9) {
+		subSize -= .5;
+		subtitleLines = layout.wrap(j.subtitle, 318, "italic", subSize);
+	}
+	for (const line of subtitleLines) {
+		layout.text(line, 43, y, {
+			font: "italic",
+			size: subSize,
+			color: PALETTE.taupe,
+			width: 318
+		});
+		y += subSize * 1.15;
+	}
+	doc.moveTo(42, 489).lineTo(116, 489).lineWidth(1).stroke(PALETTE.gold);
+	const effectiveDate = model.quote?.travelDate || input.date;
+	layout.text(effectiveDate ? displayDate(effectiveDate) : "Даты подберём вместе", 42, 507, {
+		size: 10.5,
+		color: PALETTE.olive,
+		width: 321
+	});
+	const party = `${input.adults} взр.${input.children?.length ? ` · ${input.children.length} дет.` : ""} · ${input.nights} ночей по заявке`;
+	layout.text(party, 42, 526, {
+		size: 9.2,
+		color: PALETTE.muted,
+		width: 321
+	});
+	doc.save().opacity(.87).rect(426, 523, 389, 31).fill(PALETTE.ivory).restore();
+	layout.text("Иллюстрация настроения путешествия", 442, 533, {
+		size: 8.2,
+		color: PALETTE.olive,
+		width: 357
+	});
+}
+function overviewPages(layout) {
+	const { model } = layout, j = model.journey, input = model.input;
+	layout.page("Замысел путешествия", { subtitle: formatNames[j.format] ?? "Индивидуальный маршрут" });
+	layout.paragraph(j.overview, {
+		font: "title",
+		size: 21,
+		leading: 27,
+		color: PALETTE.olive,
+		after: 18
+	});
+	const effectiveDate = model.quote?.travelDate || input.date;
+	const facts = [
+		["Для кого", model.customerName || "Гостей Tiare Travel"],
+		["Направление и точки маршрута", `${j.country} · ${(j.destinations ?? []).join(" · ")}`],
+		[model.quote ? "Дата поездки / длительность" : "Выезд / длительность по заявке", `${effectiveDate ? displayDate(effectiveDate) : "Дата подбирается с менеджером"} · ${input.nights} ночей по заявке`],
+		["Состав путешественников", `${input.adults} взрослых${input.children?.length ? `; дети: ${input.children.map((age) => `${age} лет`).join(", ")}` : "; без детей"}`],
+		["Ритм и приоритеты", `${paceNames[input.pace] ?? input.pace}. ${(input.priorities ?? []).map((p) => priorityNames[p] ?? p).join(", ") || "Уточняются"}`]
+	];
+	if (model.mode === "review") facts.push(["Бюджет из заявки", rubles(input.budget)]);
+	layout.factGrid(facts);
+	layout.card({
+		eyebrow: "ОСОБЕННОСТЬ ВАРИАНТА",
+		sections: [{ text: j.tradeoff }]
+	});
+	if (model.managerNote?.trim()) layout.card({
+		eyebrow: "КОММЕНТАРИЙ ВАШЕГО МЕНЕДЖЕРА",
+		sections: [{ text: model.managerNote }]
+	}, { accent: PALETTE.olive });
+	if (input.special?.trim()) layout.paragraph(input.special, { label: "Индивидуальные пожелания из заявки" });
+}
+function programPages(layout) {
+	const j = layout.model.journey;
+	layout.page("Программа и впечатления", { subtitle: "Содержание выбранного варианта. Распределение этапов по датам и часам согласуется с менеджером." });
+	const cards = [];
+	for (let i = 0; i < (j.program ?? []).length; i++) {
+		const day = j.program[i], sections = [{ text: `Днём. ${day.activity}` }, { text: `Вечером. ${day.evening}` }];
+		for (const source of day.sources ?? []) sections.push({
+			text: `${source.title} · ${sourceHost(source.url)}`,
+			size: 9,
+			color: PALETTE.olive,
+			link: source.url,
+			after: 5
+		});
+		cards.push({
+			eyebrow: `ЭТАП ${String(i + 1).padStart(2, "0")}`,
+			title: day.title,
+			titleSize: 20,
+			sections
+		});
+	}
+	const columns = cards.length === 3 ? 3 : 2;
+	for (let index = 0; index < cards.length; index += columns) layout.cardGrid(cards.slice(index, index + columns), { columns });
+}
+function hotelPages(layout) {
+	const j = layout.model.journey;
+	layout.page("Отели и пространство отдыха", { subtitle: "Конкретные объекты и категории размещения из выбранного варианта. Наличие на даты проверяется до оформления." });
+	for (let i = 0; i < (j.hotel ?? []).length; i++) {
+		const hotel = j.hotel[i];
+		layout.card({
+			eyebrow: `${String(i + 1).padStart(2, "0")} · ${hotel.location}`,
+			title: hotel.name,
+			sections: [
+				{
+					label: "КАТЕГОРИЯ НОМЕРА / ВИЛЛЫ / КАЮТЫ",
+					text: hotel.room,
+					color: PALETTE.olive
+				},
+				{
+					label: "ДЕТАЛИ РАЗМЕЩЕНИЯ",
+					text: hotel.description
+				},
+				{
+					text: `Официальный источник · ${sourceHost(hotel.url)}`,
+					link: hotel.url,
+					size: 9,
+					color: PALETTE.olive
+				}
+			]
+		});
+	}
+}
+function logisticsPages(layout) {
+	const { model } = layout, input = model.input;
+	layout.page("Дорога и билеты", { subtitle: "Логистика маршрута и требования к перелётам" });
+	layout.paragraph(model.journey.logistics, {
+		font: "title",
+		size: 21,
+		leading: 28,
+		color: PALETTE.olive,
+		after: 24
+	});
+	layout.rows([
+		["Отправление из", input.departure || "Город уточняется"],
+		[model.quote ? "Дата поездки в расчёте" : "Запрошенная дата выезда", model.quote?.travelDate || input.date ? displayDate(model.quote?.travelDate || input.date) : "Дата уточняется"],
+		["Класс перелёта", input.cabin === "business" ? "Бизнес-класс" : "Экономический класс"],
+		["Пересадки", input.directOnly ? "По заявке нужны прямые рейсы" : "Допускаются по согласованию"],
+		["Ограничение дороги", input.maxHours > 0 ? `По заявке: не более ${input.maxHours} ч. Требует проверки на конкретных рейсах.` : "Отдельный лимит времени в заявке не задан"],
+		["Смены размещения", `В выбранном варианте: ${model.journey.changes ?? 0}. Допустимо по заявке: ${input.hotelChanges ?? 0}.`]
+	]);
+	layout.card({
+		eyebrow: "ЧТО ПОДТВЕРЖДАЕТСЯ ДО ОФОРМЛЕНИЯ",
+		sections: [{ text: "Конкретные рейсы, аэропорты, время вылета и прилёта, багаж, тарифные правила и условия трансферов. В сохранённом варианте нет отдельной проверенной таблицы билетов." }]
+	});
+}
+function mapPages(layout, geography) {
+	const { doc, model } = layout;
+	const destinations = model.journey.destinations ?? [];
+	const dictionary = geography?.locations ?? {};
+	const points = destinations.map((name, index) => {
+		const place = dictionary[canonical(name)];
+		return {
+			name,
+			index,
+			place: place && Number.isFinite(place.lon) && Number.isFinite(place.lat) && Math.abs(place.lat) <= 90 && Math.abs(place.lon) <= 180 ? place : null
+		};
+	});
+	const known = points.filter((point) => point.place);
+	layout.page("География путешествия", { subtitle: "Ориентиры выбранного маршрута" });
+	const legendWidth = 231, legendX = PAGE.margin + BODY_WIDTH - legendWidth;
+	const sideLegend = points.map((point) => {
+		const title = `${String(point.index + 1).padStart(2, "0")} · ${point.name}`;
+		const status = point.place ? "Ориентир нанесён на карту." : "Географическая точка уточняется.";
+		const source = point.place?.source ? `Источник · ${sourceHost(point.place.source)}` : null;
+		const titleLines = layout.wrap(title, legendWidth, "title", 16), statusLines = layout.wrap(status, legendWidth, "body", 10.5), sourceLines = source ? layout.wrap(source, legendWidth, "body", 8.5) : [];
+		return {
+			point,
+			titleLines,
+			statusLines,
+			sourceLines,
+			height: titleLines.length * 19 + 4 + statusLines.length * 15 + 3 + sourceLines.length * 12 + 9
+		};
+	});
+	const useSidebar = points.length <= 5 && sideLegend.reduce((sum, item) => sum + item.height, 0) <= 320;
+	const box = {
+		x: PAGE.margin,
+		y: layout.y + 2,
+		w: useSidebar ? BODY_WIDTH - legendWidth - 25 : BODY_WIDTH,
+		h: 320
+	};
+	doc.roundedRect(box.x, box.y, box.w, box.h, 3).fill("#E8E9DE");
+	let west = -180, east = 180, south = -63, north = 85;
+	if (known.length) {
+		const lons = known.map((point) => point.place.lon), lats = known.map((point) => point.place.lat);
+		west = Math.min(...lons);
+		east = Math.max(...lons);
+		south = Math.min(...lats);
+		north = Math.max(...lats);
+		const centerLat = (south + north) / 2;
+		const lonSpread = Math.max(east - west, 5), latSpread = Math.max(north - south, 4);
+		const padLon = Math.max(lonSpread * .16, 1), padLat = Math.max(latSpread * .19, 1);
+		west -= padLon;
+		east += padLon;
+		south -= padLat;
+		north += padLat;
+		const aspect = box.w / box.h, cos = Math.max(.35, Math.cos(centerLat * Math.PI / 180));
+		if ((east - west) * cos / (north - south) < aspect) {
+			const desired = (north - south) * aspect / cos, mid = (east + west) / 2;
+			west = mid - desired / 2;
+			east = mid + desired / 2;
+		} else {
+			const desired = (east - west) * cos / aspect, mid = (north + south) / 2;
+			south = mid - desired / 2;
+			north = mid + desired / 2;
+		}
+		west = Math.max(-180, west);
+		east = Math.min(180, east);
+		south = Math.max(-85, south);
+		north = Math.min(89, north);
+	}
+	const project = ([lon, lat]) => [box.x + (lon - west) / (east - west) * box.w, box.y + box.h - (lat - south) / (north - south) * box.h];
+	const polygons = [];
+	for (const feature of geography?.land?.features ?? []) if (feature.geometry?.type === "Polygon") polygons.push(feature.geometry.coordinates);
+	else if (feature.geometry?.type === "MultiPolygon") polygons.push(...feature.geometry.coordinates);
+	doc.save().rect(box.x, box.y, box.w, box.h).clip();
+	for (const polygon of polygons) {
+		let drew = false;
+		for (const ring of polygon) {
+			if (!ring.length) continue;
+			if (ring.every((point) => point[0] < west) || ring.every((point) => point[0] > east) || ring.every((point) => point[1] < south) || ring.every((point) => point[1] > north)) continue;
+			let first = true;
+			for (const coordinate of ring) {
+				const [x, y] = project(coordinate);
+				if (first) {
+					doc.moveTo(x, y);
+					first = false;
+				} else doc.lineTo(x, y);
+			}
+			doc.closePath();
+			drew = true;
+		}
+		if (drew) doc.lineWidth(.45).fillAndStroke("#D1D6C1", "#A5AD93", "even-odd");
+	}
+	doc.lineWidth(1.4).strokeColor(PALETTE.gold).dash(5, { space: 4 });
+	for (let i = 1; i < points.length; i++) {
+		if (!points[i - 1].place || !points[i].place) continue;
+		const [x1, y1] = project([points[i - 1].place.lon, points[i - 1].place.lat]);
+		const [x2, y2] = project([points[i].place.lon, points[i].place.lat]);
+		doc.moveTo(x1, y1).lineTo(x2, y2).stroke();
+	}
+	doc.undash();
+	const labels = [];
+	for (const point of known) {
+		const [px, py] = project([point.place.lon, point.place.lat]);
+		const marker = String(point.index + 1).padStart(2, "0"), markerW = 25, markerH = 21;
+		const candidates = [
+			[10, -27],
+			[10, 7],
+			[-35, -27],
+			[-35, 7],
+			[12, -52],
+			[-36, 32],
+			[40, -8],
+			[-66, -8]
+		];
+		let label = null;
+		const collides = (candidate) => labels.some((other) => candidate.x < other.x + other.w + 3 && candidate.x + candidate.w + 3 > other.x && candidate.y < other.y + other.h + 3 && candidate.y + candidate.h + 3 > other.y);
+		for (const [dx, dy] of candidates) {
+			const candidate = {
+				x: Math.max(box.x + 5, Math.min(box.x + box.w - markerW - 5, px + dx)),
+				y: Math.max(box.y + 5, Math.min(box.y + box.h - markerH - 5, py + dy)),
+				w: markerW,
+				h: markerH
+			};
+			if (!collides(candidate)) {
+				label = candidate;
+				break;
+			}
+		}
+		if (!label) {
+			let bestDistance = Infinity;
+			for (let y = box.y + 6; y + markerH < box.y + box.h - 5; y += markerH + 6) for (let x = box.x + 6; x + markerW < box.x + box.w - 5; x += markerW + 6) {
+				const candidate = {
+					x,
+					y,
+					w: markerW,
+					h: markerH
+				};
+				if (collides(candidate)) continue;
+				const distance = (x + markerW / 2 - px) ** 2 + (y + markerH / 2 - py) ** 2;
+				if (distance < bestDistance) {
+					label = candidate;
+					bestDistance = distance;
+				}
+			}
+		}
+		if (!label) throw new Error("PDF map has no free label position.");
+		labels.push(label);
+		doc.moveTo(px, py).lineTo(label.x + markerW / 2, label.y + markerH / 2).lineWidth(.6).stroke(PALETTE.olive);
+		doc.circle(px, py, 4).fill(PALETTE.olive);
+		doc.circle(px, py, 1.6).fill(PALETTE.paper);
+		doc.roundedRect(label.x, label.y, markerW, markerH, 3).fill(PALETTE.olive);
+		layout.text(marker, label.x + 4, label.y + 5, {
+			size: 8.5,
+			color: PALETTE.paper,
+			width: markerW - 8,
+			align: "center"
+		});
+	}
+	doc.restore();
+	if (!known.length) {
+		const inset = useSidebar ? 31 : 90, panelWidth = box.w - inset * 2;
+		doc.save().opacity(.94).roundedRect(box.x + inset, box.y + 83, panelWidth, 151, 3).fill(PALETTE.paper).restore();
+		let noteY = layout.wrapped("Географические точки уточняются", box.x + inset + 18, box.y + 106, panelWidth - 36, {
+			font: "title",
+			size: 22,
+			color: PALETTE.olive,
+			leading: 25
+		});
+		layout.wrapped("На карте показан общий географический контекст.", box.x + inset + 18, noteY + 12, panelWidth - 36, {
+			size: 10.5,
+			color: PALETTE.muted,
+			leading: 15
+		});
+	}
+	if (useSidebar) {
+		let legendY = box.y + 3;
+		for (const item of sideLegend) {
+			for (const line of item.titleLines) {
+				layout.text(line, legendX, legendY, {
+					font: "title",
+					size: 16,
+					color: PALETTE.olive,
+					width: legendWidth
+				});
+				legendY += 19;
+			}
+			legendY += 4;
+			for (const line of item.statusLines) {
+				layout.text(line, legendX, legendY, {
+					size: 10.5,
+					color: PALETTE.muted,
+					width: legendWidth
+				});
+				legendY += 15;
+			}
+			legendY += 3;
+			for (const line of item.sourceLines) {
+				layout.text(line, legendX, legendY, {
+					size: 8.5,
+					color: PALETTE.olive,
+					width: legendWidth,
+					link: item.point.place?.source
+				});
+				legendY += 12;
+			}
+			legendY += 9;
+			doc.moveTo(legendX, legendY - 4).lineTo(legendX + legendWidth, legendY - 4).lineWidth(.45).stroke(PALETTE.line);
+		}
+	}
+	layout.y = box.y + box.h + 14;
+	layout.paragraph("Линии соединяют ориентиры; это не траектория перелёта или дороги. Время, транспорт, расстояния по маршруту и точные точки подтверждаются менеджером.", {
+		size: 8.7,
+		leading: 12.5,
+		color: PALETTE.muted,
+		after: 9
+	});
+	layout.paragraph(`Картографическая основа: ${geography?.source?.title ?? "Natural Earth"}. География показана схематично.`, {
+		size: 8,
+		leading: 12,
+		color: PALETTE.muted,
+		link: geography?.source?.url,
+		after: 17
+	});
+	if (!useSidebar) for (const point of points) {
+		const lines = [{
+			text: point.place ? "Географический ориентир нанесён на карту." : "Географическая точка уточняется.",
+			size: 9,
+			color: PALETTE.muted,
+			after: 4
+		}];
+		if (point.place?.source) lines.push({
+			text: `Источник ориентира · ${sourceHost(point.place.source)}`,
+			size: 8.5,
+			color: PALETTE.olive,
+			link: point.place.source,
+			after: 3
+		});
+		layout.card({
+			eyebrow: `ТОЧКА ${String(point.index + 1).padStart(2, "0")}`,
+			title: point.name,
+			sections: lines
+		});
+	}
+}
+function costPages(layout) {
+	const { model } = layout, quote = model.quote;
+	const preview = model.mode === "review";
+	const estimate = preview ? model.estimate : null;
+	layout.page("Стоимость и условия", { subtitle: quote ? "Данные проверки менеджера по выбранному варианту" : "Статус расчёта выбранного путешествия" });
+	if (quote) {
+		layout.card({
+			eyebrow: "ПРОВЕРЕННАЯ СТОИМОСТЬ",
+			title: rubles(quote.amount),
+			titleSize: 39,
+			sections: [{
+				text: "Объём услуг и ограничения расчёта приведены ниже. Стоимость действительна в пределах указанного срока.",
+				size: 10.5,
+				color: PALETTE.muted
+			}]
+		}, { accent: PALETTE.olive });
+		layout.rows([
+			["Проверено менеджером", displayDateTime(quote.checkedAt)],
+			["Дата поездки в расчёте", displayDate(quote.travelDate)],
+			["Срок действия", displayDateTime(quote.validUntil)]
+		]);
+		layout.paragraph(quote.scope, { label: "Состав проверенного расчёта" });
+		layout.paragraph(quote.availability, { label: "Наличие мест" });
+		layout.paragraph(quote.terms, { label: "Условия стоимости и оформления" });
+		if (preview && quote.source) layout.paragraph(`Источник проверки · ${sourceHost(quote.source)}`, {
+			label: "Ссылка для менеджера",
+			link: quote.source,
+			color: PALETTE.olive,
+			size: 9.5
+		});
+	} else if (preview && estimate) {
+		const kind = estimate.kind === "demo" ? "ДЕМОНСТРАЦИОННЫЙ РАСЧЁТ" : "ПРЕДВАРИТЕЛЬНАЯ ОЦЕНКА";
+		layout.card({
+			eyebrow: kind,
+			title: `${rubles(estimate.low)} - ${rubles(estimate.high)}`,
+			titleSize: 34,
+			sections: [{
+				text: estimate.kind === "demo" ? "Условные суммы для проверки сервиса. Не являются тарифами поставщиков и не подтверждают наличие мест." : "Оценка бюджета без подтверждения тарифов и наличия мест. Для клиентского предложения требуется отдельная проверка.",
+				size: 10.5,
+				color: PALETTE.warning
+			}]
+		}, { accent: PALETTE.warning });
+		layout.rows((estimate.lines ?? []).map((line) => [line.name, rubles(line.amount)]));
+		layout.paragraph(estimate.source, {
+			label: "Основа расчёта",
+			size: 10.5,
+			color: PALETTE.muted
+		});
+	} else layout.card({
+		eyebrow: "СТАТУС СТОИМОСТИ",
+		title: "Стоимость уточняется",
+		sections: [{ text: "Этот документ описывает выбранную идею путешествия. Менеджер отдельно подтвердит стоимость, наличие, состав услуг и условия оформления под ваши даты." }]
+	}, { accent: PALETTE.olive });
+	const inclusionHeight = 92 + [...model.journey.includes ?? [], ...model.journey.excludes ?? []].reduce((sum, item) => sum + layout.wrap(item, BODY_WIDTH - 22, "body", 10.5).length * 15.5 + 9, 0);
+	if (layout.y + inclusionHeight > PAGE.bottom) layout.page("Что входит в путешествие", { subtitle: "Состав выбранной идеи и услуги, которые согласуются отдельно" });
+	else {
+		layout.gap(5);
+		layout.label("Состав выбранной идеи");
+	}
+	layout.paragraph("Перечень ниже сохранён в описании маршрута. Подтверждённый объём услуг определяется составом проверенного расчёта и условиями оформления.", {
+		size: 10.5,
+		color: PALETTE.muted,
+		after: 16
+	});
+	layout.paragraph("Предусмотрено в описании", {
+		font: "title",
+		size: 19,
+		color: PALETTE.olive,
+		after: 10
+	});
+	layout.bullets(model.journey.includes);
+	layout.gap(8);
+	layout.paragraph("Отдельно или вне состава", {
+		font: "title",
+		size: 19,
+		color: PALETTE.olive,
+		after: 10
+	});
+	layout.bullets(model.journey.excludes);
+}
+function preparationPages(layout) {
+	const j = layout.model.journey;
+	layout.page("Детали перед путешествием", { subtitle: "Практическая информация из выбранного варианта" });
+	layout.card({
+		eyebrow: "СЕЗОН И УСЛОВИЯ",
+		sections: [{ text: j.season }]
+	});
+	layout.card({
+		eyebrow: "ДОКУМЕНТЫ И ВЪЕЗД",
+		sections: [{ text: j.documents }]
+	});
+	if (layout.model.mode === "review") {
+		const input = layout.model.input;
+		const checks = [...layout.model.issues ?? [], ...layout.model.review ?? []];
+		if (checks.length) {
+			layout.label("Проверить перед отправкой");
+			layout.bullets(checks, { color: PALETTE.warning });
+		}
+		const brief = [];
+		if (input.destination?.trim()) brief.push(["Пожелание по направлению", input.destination]);
+		if (input.excluded?.trim()) brief.push(["Исключённые направления", input.excluded]);
+		if (input.formats?.length) brief.push(["Форматы из заявки", input.formats.map((item) => formatNames[item] ?? item).join(", ")]);
+		if (brief.length) {
+			layout.gap(8);
+			layout.label("Дополнения к анкете");
+			layout.rows(brief);
+		}
+	}
+}
+function closingPage(layout) {
+	const { doc, model } = layout;
+	layout.base({ final: true });
+	flower(doc, 637, 290, 172, {
+		opacity: .15,
+		fill: "#ECEBDF",
+		stroke: "#B3B9A5"
+	});
+	flower(doc, 80, 197, 25, {
+		fill: PALETTE.paper,
+		stroke: PALETTE.olive
+	});
+	layout.wrapped("Ваше путешествие\nначинается с деталей.", 61, 247, 525, {
+		font: "title",
+		size: 36,
+		color: PALETTE.olive,
+		leading: 41
+	});
+	const ending = model.mode === "review" ? "Проверьте содержание, маршрут и условия. После согласования подготовьте клиентскую версию предложения." : model.quote ? "Обсудите детали с вашим менеджером. После согласования предложения агентство перейдёт к оформлению путешествия." : "Обсудите выбранную идею с вашим менеджером. Следующий шаг - проверка стоимости и наличия на ваши даты.";
+	layout.wrapped(ending, 64, 361, 488, {
+		size: 11,
+		color: PALETTE.muted,
+		leading: 17
+	});
+	layout.text(`Подготовлено ${displayDate(model.generatedAt)}`, 64, 474, {
+		size: 8.5,
+		color: PALETTE.taupe
+	});
+}
+/**
+* Render a sanitized proposal snapshot to a real, self-contained PDF.
+* @param {object} model Authorized immutable snapshot from proposal-data.mjs.
+* @param {{assetRoot:string}} options Local release asset directory.
+* @returns {Promise<Buffer>}
+*/
+async function renderProposalPdf(model, { assetRoot } = {}) {
+	if (!assetRoot) throw new TypeError("PDF assetRoot is required.");
+	if (!model?.journey || !model?.input || !["review", "client"].includes(model.mode)) throw new TypeError("Invalid PDF proposal snapshot.");
+	const assets = await assetsAt(assetRoot);
+	const doc = new PDFDocument({
+		autoFirstPage: false,
+		bufferPages: true,
+		compress: true,
+		font: assets.body,
+		margin: 0,
+		pdfVersion: "1.7",
+		info: {
+			Title: `Tiare Travel - ${safeText(model.journey.title)}`,
+			Author: "Tiare Travel",
+			Subject: model.mode === "review" ? "Рабочее предложение для менеджера" : "Индивидуальное предложение путешествия",
+			Creator: "Tiare Travel",
+			Producer: "Tiare Travel PDF",
+			CreationDate: new Date(model.generatedAt || Date.now())
+		}
+	});
+	doc.registerFont("title", assets.title).registerFont("italic", assets.italic).registerFont("body", assets.body);
+	const chunks = [];
+	let bytes = 0;
+	const done = new Promise((resolvePromise, reject) => {
+		doc.on("data", (chunk) => {
+			bytes += chunk.length;
+			if (bytes > MAX_BYTES) {
+				doc.destroy(Object.assign(/* @__PURE__ */ new Error("PDF превышает 12 МБ. Сократите повторяющиеся описания перед экспортом."), { status: 413 }));
+				return;
+			}
+			chunks.push(chunk);
+		});
+		doc.once("end", () => resolvePromise(Buffer.concat(chunks)));
+		doc.once("error", reject);
+	});
+	try {
+		const layout = makeLayout(doc, model);
+		coverPage(layout, assets);
+		overviewPages(layout);
+		programPages(layout);
+		hotelPages(layout);
+		logisticsPages(layout);
+		mapPages(layout, assets.geography);
+		costPages(layout);
+		preparationPages(layout);
+		closingPage(layout);
+		layout.footers();
+		doc.end();
+	} catch (error) {
+		doc.destroy(error);
+	}
+	return done;
+}
+//#endregion
 //#region server/app.mjs
+var pdfInProgress = false;
+var maxPdfBytes = 16 * 1024 * 1024;
 var types = {
 	".html": "text/html; charset=utf-8",
 	".js": "text/javascript; charset=utf-8",
@@ -5743,7 +7123,7 @@ async function serveStatic(request, response, url, root) {
 		throw clientError(503, "Интерфейс ещё не собран.");
 	}
 }
-async function createApp({ env = process.env, database, providers, startOutbox = true } = {}) {
+async function createApp({ env = process.env, database, providers, startOutbox = true, pdfRenderer = renderProposalPdf } = {}) {
 	appUrl(env);
 	const db = database || await createDatabase(env), outbox = createOutbox(db, env, providers), staticRoot = resolve(env.STATIC_DIR || resolve(process.cwd(), "dist"));
 	const server = createServer(async (request, response) => {
@@ -5763,6 +7143,33 @@ async function createApp({ env = process.env, database, providers, startOutbox =
 				if (!["GET", "POST"].includes(request.method || "")) throw clientError(405, "Метод не поддерживается.");
 				if (request.method === "POST") verifyOrigin(request, env);
 				const session = await sessionForRequest(db, request, response, env);
+				const pdfRoute = url.pathname.match(/^\/api\/requests\/([^/]+)\/proposal\.pdf$/);
+				if (pdfRoute) {
+					requireManager(session);
+					if (request.method !== "GET") throw clientError(405, "PDF доступен только для просмотра.");
+					const model = await loadProposalModel(db, session, parseProposalQuery(pdfRoute[1], url.searchParams));
+					if (pdfInProgress) {
+						response.setHeader("Retry-After", "5");
+						throw clientError(429, "Другой PDF ещё формируется. Повторите через несколько секунд.");
+					}
+					pdfInProgress = true;
+					try {
+						const pdf = await pdfRenderer(model, { assetRoot: staticRoot });
+						if (!Buffer.isBuffer(pdf) || pdf.length > maxPdfBytes || !pdf.subarray(0, 5).equals(Buffer.from("%PDF-"))) throw clientError(503, "Не удалось подготовить PDF. Попробуйте повторить позже.");
+						if ((await db.query("SELECT revision FROM travel_requests WHERE id=?", [model.id])).rows[0]?.revision !== model.revision) throw clientError(409, "Заявка изменилась во время подготовки PDF. Обновите её и повторите выгрузку.");
+						if (model.quote && Date.parse(model.quote.validUntil) <= Date.now()) throw clientError(409, "Срок подтверждённой цены истёк во время подготовки PDF. Повторите выгрузку: устаревшая цена будет убрана.");
+						response.writeHead(200, {
+							"Content-Type": "application/pdf",
+							"Content-Length": pdf.length,
+							"Content-Disposition": `inline; filename="TiareTravel-${model.id.slice(0, 8)}-${model.mode}-r${model.revision}.pdf"`,
+							"Cache-Control": "no-store"
+						});
+						response.end(pdf);
+					} finally {
+						pdfInProgress = false;
+					}
+					return;
+				}
 				if (url.pathname === "/api/workspace" && request.method === "GET") {
 					sendJson(response, 200, await readWorkspace(db, session, env));
 					return;
