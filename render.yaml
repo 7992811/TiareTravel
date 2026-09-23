@@ -1,0 +1,45 @@
+# yaml-language-server: $schema=https://render.com/schema/render.yaml.json
+# TiareTravel: isolated test project. Free PostgreSQL expires after 30 days.
+projects:
+  - name: TiareTravel
+    environments:
+      - name: Test
+        services:
+          - type: web
+            name: tiare-travel-test
+            runtime: node
+            region: frankfurt
+            plan: free
+            buildCommand: npm ci --omit=dev
+            startCommand: npm start
+            healthCheckPath: /healthz
+            autoDeployTrigger: commit
+            envVars:
+              - key: NODE_VERSION
+                value: 24.19.0
+              - key: NODE_ENV
+                value: production
+              - key: STATIC_DIR
+                value: .
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: tiare-travel-test-db
+                  property: connectionString
+              - key: MANAGER_PASSWORD
+                generateValue: true
+              - key: MAIL_MODE
+                value: test
+              - key: MANAGER_EMAIL
+                sync: false
+              - key: TEST_RECIPIENT_EMAIL
+                sync: false
+              - key: MAIL_FROM
+                value: Tiare Travel Test <onboarding@resend.dev>
+        databases:
+          - name: tiare-travel-test-db
+            databaseName: tiare_travel
+            user: tiare_travel
+            region: frankfurt
+            plan: free
+            postgresMajorVersion: "17"
+            ipAllowList: []

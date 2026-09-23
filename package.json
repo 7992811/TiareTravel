@@ -1,0 +1,15 @@
+{
+  "name": "tiare-travel-test",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.19.0 <25"
+  },
+  "scripts": {
+    "start": "node tiare-server.mjs"
+  },
+  "dependencies": {
+    "pg": "8.23.0"
+  }
+}
