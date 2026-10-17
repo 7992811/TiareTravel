@@ -1,0 +1,114 @@
+name: Tiare Travel Alpine Photo Assets
+on:
+  push:
+    branches: [tiare-photo-sourcing-20261017]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  collect-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Prepare image processing
+        run: python3 -m pip install --quiet Pillow
+      - name: Fetch curated hotel photography
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import urllib.request, time, json, io, os
+          from PIL import Image, ImageOps
+          sources = {
+          "aman_exterior": [
+           "https://cdn.mos.cms.futurecdn.net/v2/t%3A0%2Cl%3A141%2Ccw%3A1258%2Cch%3A944%2Cq%3A80%2Cw%3A1258/yBnkZcPjtEW7fPPbznzDc5.jpg",
+           "https://www.mabeyski.com/app/uploads/2026/02/MABEY-SKI_ITALY_DOLOMITES_AMAN-ROSA-ALPINA_HERO.jpg",
+           "https://s.yimg.com/ny/api/res/1.2/PjP2Gb7y08iloMIjLmn7Eg--/YXBwaWQ9aGlnaGxhbmRlcjt3PTEyNDI7aD04Mjg-/https%3A/media.zenfs.com/en/aol_uk_the_independent_uk_182/90bf0929603ee0976de447603417ff54"
+          ],
+          "aman_suite": [
+           "https://www.aman.com/sites/default/files/styles/listing_teaser_extra_large/public/2025-08/Aman%20Rosa%20Alpina%2C%20Italy%20-%20Accommodation%2C%20%20Junior%20Suite%2C%20Room%20106%2C%201164%20copy.jpg?itok=CNGkf2v4"
+          ],
+          "aman_pool": [
+           "https://pub-7da0281887564d10a10107987c7c6c0c.r2.dev/wix/68dd32_2b05110bd6dd44aa9e7b8b389db6d304~mv2.jpeg"
+          ],
+          "eriro_exterior": [
+           "https://static.rollingpin.ch/public/uploads/job-postings-images/8c/43/124299500/613048/images/resized/AlexMoling_Eriro_Exterior_41_min_1-1920x1280.jpg",
+           "https://www.sleepermagazine.com/wp-content/uploads/2024/08/Eriro-2.jpg",
+           "https://typo3.eriro.at/fileadmin/user_upload/Best-Of_Alex_Moling/AlexMoling_Eriro_Exterior-32.jpg"
+          ],
+          "eriro_suite": [
+           "https://typo3.eriro.at/fileadmin/user_upload/Suiten/boum/AlexMoling_Eriro_Rooms-1.jpg",
+           "https://cdn.mos.cms.futurecdn.net/cFd43tzMCgGbef8P4e7qnP.jpg"
+          ],
+          "eriro_wellness": [
+           "https://typo3.eriro.at/fileadmin/user_upload/Best-Of_Alex_Moling/AlexMoling_Eriro_Wellness-9.jpg"
+          ],
+          "stieg_exterior": [
+           "https://cdn.sanity.io/images/xu7izlvh/production/daa8b2cb1d0e0ae4e540be8349a965a0015ddbb1-1920x1280.jpg?auto=format&q=75&w=3840"
+          ],
+          "stieg_suite": [
+           "https://falstaff.b-cdn.net/storage/2025/07/web_stiegnhaus_interior2cbykarinpasterer.com-19.jpg",
+           "https://tourism.hochkoenig.at/media/provider/web-stiegnhaus-interiorcbykarinpasterer.com-49.jpg"
+          ],
+          "stieg_dining": [
+           "https://falstaff.b-cdn.net/storage/2025/07/web_stiegnhaus_interior2cbykarinpasterer.com-23.jpg?aspect_ratio=4%3A3&crop_gravity=middle&width=800"
+          ],
+          "saint_exterior": [
+           "https://d1m7xnn75ypr6t.cloudfront.net/images/media/B0E13972-E929-4063-AA7EA35D5092EE2A/?w=1280&h=960"
+          ],
+          "saint_suite": [
+           "https://static.showit.co/1200/FYdQ-Pqsi9x4Dqxwi-cHPg/275988/waterstone_-_chapitre_six_hotels_-_hotel_saint-georges_-_megeve_-_luxury_boutique_hotel_-_megeve_suite_andrea2_1.jpg",
+           "https://images.prismic.io/lukeedwardhall/aW08swIvOtkhBsFZ_WEB18.jpg?auto=compress%2Cformat&dpr=1&fit=max&q=70&w=2000"
+          ],
+          "saint_lounge": [
+           "https://www.repstatic.it/content/localirep/img/rep-d/2026/02/20/121127844-b3bc31bc-383a-44a6-b2ee-fd7eaa6a6972.jpg",
+           "https://images.prismic.io/lukeedwardhall/aW0z5AIvOtkhBsEU_WEB3.jpg?auto=compress%2Cformat&dpr=1&fit=max&q=70&w=2000"
+          ],
+          "saint_bar": [
+           "https://images.prismic.io/lukeedwardhall/aW09mwIvOtkhBsFd_WEB20.jpg?auto=compress%2Cformat&dpr=1&fit=max&h=1500&q=70&w=2000"
+          ],
+          "lodge_exterior": [
+           "https://cdn.prod.website-files.com/65f8b2b60792af24c42728ee/6654a75d4ca320ed32838e60_nouveau-lodge-park-article.png"
+          ],
+          "lodge_suite": [
+           "https://media.cntraveller.com/photos/69822b9cad3d578e14371e35/16%3A9/w_2560%2Cc_limit/suite-lodge-park-megeve-france-february-2026-pr-global.jpg",
+           "https://images.squarespace-cdn.com/content/v1/5540c80ce4b095e497be5565/1741724769461-X16EU1SDKB5Q6DYTRCCS/LODGE%2BPARK%2BROOMS2028.JPG"
+          ],
+          "lodge_spa": [
+           "https://admin-pmb.orchestra-platform.com/admin/TS/fckUserFiles/Image/Megeve/HOTEL_LODGE_PARK/NEW_2025/2024_Guillaume_GrassetLODGE_PARK_2022619.jpg"
+          ]
+          }
+          os.makedirs('photos', exist_ok=True)
+          log={}
+          for label, urls in sources.items():
+              ok=False
+              for u in urls:
+                  for attempt in range(2):
+                      try:
+                          req=urllib.request.Request(u,headers={"User-Agent":"Mozilla/5.0 (compatible; TiareTravelBrochure/1.0)","Accept":"image/avif,image/webp,image/apng,image/*,*/*;q=0.8","Referer":u.split('/')[0]+'//'+u.split('/')[2]+'/'})
+                          with urllib.request.urlopen(req,timeout=24) as r:
+                              raw=r.read(14000000)
+                          im=Image.open(io.BytesIO(raw)); im.load(); im=ImageOps.exif_transpose(im).convert('RGB')
+                          if min(im.size)<500: raise ValueError('too small '+str(im.size))
+                          im.thumbnail((2400,1800),Image.Resampling.LANCZOS)
+                          im.save('photos/'+label+'.jpg','JPEG',quality=89,optimize=True,subsampling=0)
+                          log[label]={"ok":True,"size":im.size,"source":u,"bytes":len(raw)}
+                          print('OK',label,im.size,u[:90],flush=True)
+                          ok=True
+                          break
+                      except Exception as e:
+                          print('RETRY',label,str(e)[:100],flush=True)
+                          time.sleep(0.2)
+                  if ok: break
+              if not ok:log[label]={"ok":False,"sources":urls}
+          with open('photos/manifest.json','w') as f:json.dump(log,f,indent=2)
+          print('SUMMARY',sum(v['ok'] for v in log.values()),'/',len(log),flush=True)
+          
+          PY
+      - name: Save approved photographs
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiare-alpine-hotel-photos
+          path: photos/
+          if-no-files-found: error
+          retention-days: 1
