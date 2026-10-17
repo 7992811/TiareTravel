@@ -1,0 +1,58 @@
+name: Tiare Travel Alps Basemap
+on:
+  push:
+    branches: [tiare-photo-sourcing-20261017]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  basemap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: python3 -m pip install --quiet Pillow
+      - name: Collect OpenStreetMap background
+        run: |
+          python3 - <<'PY'
+          import os,math,io,json,urllib.request,concurrent.futures
+          from PIL import Image
+          z=8
+          lo1,lo2=5.8,14.1
+          la1,la2=45.25,48.15
+          def xp(lon):return (lon+180)/360*2**z*256
+          def yp(lat):return (1-math.asinh(math.tan(math.radians(lat)))/math.pi)/2*2**z*256
+          xmin,xmax=xp(lo1),xp(lo2)
+          ymin,ymax=yp(la2),yp(la1)
+          x0,x1=int(xmin//256),int(xmax//256)
+          y0,y1=int(ymin//256),int(ymax//256)
+          print('tile bounds',x0,x1,y0,y1,flush=True)
+          canvas=Image.new('RGB',((x1-x0+1)*256,(y1-y0+1)*256),'#e6e9e5')
+          def fetch(p):
+           x,y=p
+           for host in ['https://a.basemaps.cartocdn.com/light_all/','https://b.basemaps.cartocdn.com/light_all/','https://tile.openstreetmap.org/']:
+            u=f'{host}{z}/{x}/{y}.png'
+            try:
+             req=urllib.request.Request(u,headers={'User-Agent':'TiareTravel-Alpine-PrintMap/1.0'})
+             with urllib.request.urlopen(req,timeout=12) as r: data=r.read()
+             im=Image.open(io.BytesIO(data));im.load()
+             return x,y,im.convert('RGB')
+            except Exception as e:print('retry',u,str(e)[:50],flush=True)
+           return x,y,None
+          with concurrent.futures.ThreadPoolExecutor(max_workers=7) as ex:
+           for x,y,img in ex.map(fetch,[(x,y) for x in range(x0,x1+1) for y in range(y0,y1+1)]):
+            if img:canvas.paste(img,((x-x0)*256,(y-y0)*256))
+            print('tile',x,y,'ok' if img else 'failed',flush=True)
+          box=(round(xmin-x0*256),round(ymin-y0*256),round(xmax-x0*256),round(ymax-y0*256))
+          crop=canvas.crop(box)
+          os.makedirs('map_assets',exist_ok=True)
+          crop.save('map_assets/alps_actual_map.jpg',quality=95)
+          with open('map_assets/metadata.json','w') as f:json.dump({'bbox':[lo1,la1,lo2,la2],'zoom':z,'width':crop.width,'height':crop.height,'attribution':'© OpenStreetMap contributors · © CARTO'},f)
+          print('FINAL MAP',crop.size,flush=True)
+          
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tiare-alpine-geographic-map
+          path: map_assets/
+          retention-days: 1
