@@ -1,0 +1,58 @@
+name: Tiare Travel Verified OSM Map
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: python3 -m pip install --quiet Pillow
+      - name: Produce printable OSM map
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import math,io,os,urllib.request,json,concurrent.futures
+          from PIL import Image
+          z=8
+          bbox=[5.8,45.25,14.1,48.15]
+          lon_min,lat_min,lon_max,lat_max=bbox
+          def xy(lat,lon):
+           return ((lon+180)/360*2**z*256,(1-math.asinh(math.tan(math.radians(lat)))/math.pi)/2*2**z*256)
+          minx,maxy=xy(lat_min,lon_min);maxx,miny=xy(lat_max,lon_max)
+          x0,x1=int(minx//256),int(maxx//256)
+          y0,y1=int(miny//256),int(maxy//256)
+          def tile(pair):
+           x,y=pair
+           sources=[f"https://tile.openstreetmap.org/{z}/{x}/{y}.png",f"https://a.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png"]
+           for src in sources:
+            try:
+             req=urllib.request.Request(src,headers={"User-Agent":"TiareTravel-PrintCartography/1.0 (single private map brochure)"})
+             with urllib.request.urlopen(req,timeout=17) as r:dat=r.read()
+             im=Image.open(io.BytesIO(dat)).convert('RGB')
+             if im.size!=(256,256):raise ValueError(f'dimensions {im.size}')
+             print('OK',x,y,src[:49],flush=True)
+             return x,y,im
+            except Exception as e:print('Retry',x,y,str(e)[:70],flush=True)
+           return x,y,None
+          tiles=[(x,y) for x in range(x0,x1+1) for y in range(y0,y1+1)]
+          canvas=Image.new('RGB',((x1-x0+1)*256,(y1-y0+1)*256),'#eee')
+          fail=[]
+          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+           for x,y,im in ex.map(tile,tiles):
+            if im:canvas.paste(im,((x-x0)*256,(y-y0)*256))
+            else:fail.append((x,y))
+          crop=canvas.crop((int(minx-x0*256),int(miny-y0*256),int(maxx-x0*256),int(maxy-y0*256)))
+          os.makedirs('osmmap',exist_ok=True)
+          crop.save('osmmap/alpine_map.jpg',quality=94)
+          with open('osmmap/meta.json','w') as f:json.dump({'bbox':bbox,'failed':fail,'tiles':len(tiles),'attribution':'© OpenStreetMap contributors'},f)
+          print('MAP DONE',crop.size,'failed',len(fail),flush=True)
+          
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tiare-alpine-osm-map
+          path: osmmap/
+          retention-days: 1
