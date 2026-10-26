@@ -1,6 +1,25 @@
 # Tiare Deal Scout — Visual Standard & QC
 
-This file is a mandatory visual gate for every client-facing Deal Scout PDF.
+This file is the durable visual memory and mandatory visual gate for every client-facing Deal Scout PDF.
+
+## Absolute cover rule — MUST NEVER BE VIOLATED
+
+The first page must use:
+- one full-bleed premium photograph;
+- one uniform full-frame tonal overlay only, if needed for legibility;
+- Tiare Travel wordmark / brand line;
+- title, date and minimal destination line.
+
+The first page must NEVER contain:
+- horizontal or vertical decorative rules/lines;
+- grey lines of any kind;
+- divider strokes;
+- borders or frames;
+- partial-width or partial-height overlay rectangles that create visible horizontal/vertical boundaries;
+- bands, panels, cards, strips or boxes;
+- decorative circles, pills, badges or UI elements.
+
+If any visible line, strip, panel edge or overlay boundary appears on the cover, the PDF MUST FAIL QC and MUST NOT be sent.
 
 ## Non-negotiable design language
 
@@ -23,6 +42,7 @@ This file is a mandatory visual gate for every client-facing Deal Scout PDF.
 - Small technical typography or long paragraphs.
 - Watermarked, low-resolution, dark, dull or obviously stock-looking photography.
 - Sending a PDF before rendering and visually reviewing every page.
+- Reintroducing a previously rejected visual element after the user has explicitly banned it.
 
 ## Deal presentation hierarchy
 
@@ -40,6 +60,7 @@ Do not invent prices, discounts, availability or inclusions. Current commercial 
 Before a PDF can be delivered:
 - Render every page to images.
 - Check every page at full size.
+- Inspect the cover specifically for any unintended line, strip, panel edge, overlay boundary, border or frame.
 - Reject the output if it looks like a dashboard, cheap catalog, generic template, or internal working document.
 - Reject if text clips, overlaps, becomes too small, or competes with photography.
 - Reject if any photo is watermarked, visibly low-resolution or unrelated to the hotel/destination being presented.
